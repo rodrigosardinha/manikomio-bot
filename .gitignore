@@ -1,0 +1,18 @@
+# Arquivos de ambiente
+.env
+.env.*
+
+# Arquivos compilados
+target/
+*.class
+*.jar
+
+# Arquivos de IDE
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+
+# Logs
+*.log 

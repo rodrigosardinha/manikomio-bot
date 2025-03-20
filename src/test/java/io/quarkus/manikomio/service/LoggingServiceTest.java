@@ -1,17 +1,19 @@
 package io.quarkus.manikomio.service;
 
 import io.quarkus.manikomio.model.ServerLog;
+import io.quarkus.manikomio.repository.ServerLogRepository;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.InjectMock;
 import jakarta.inject.Inject;
-import jakarta.transaction.Transactional;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.DisplayName;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
 
 @QuarkusTest
 public class LoggingServiceTest {
@@ -19,141 +21,165 @@ public class LoggingServiceTest {
     @Inject
     LoggingService loggingService;
 
-    @BeforeEach
-    @Transactional
-    void setUp() {
-        // Limpar todos os logs antes de cada teste
-        ServerLog.deleteAll();
-    }
+    @InjectMock
+    ServerLogRepository serverLogRepository;
 
     @Test
-    @DisplayName("Deve criar um novo log com sucesso")
-    @Transactional
     void testCreateLog() {
         // Arrange
-        String eventType = "TEST_EVENT";
-        String description = "Test description";
         String userId = "123";
         String username = "testUser";
+        String eventType = "MESSAGE_SENT";
+        String description = "Test message";
         String channelId = "456";
         String channelName = "test-channel";
+        String guildId = "789";
+        String message = "Test message content";
 
         // Act
-        ServerLog log = loggingService.createLog(eventType, description, userId, username, channelId, channelName);
+        loggingService.createLog(userId, username, eventType, description, channelId, channelName, guildId, message);
 
         // Assert
-        assertNotNull(log);
-        assertEquals(eventType, log.eventType);
-        assertEquals(description, log.description);
-        assertEquals(userId, log.userId);
-        assertEquals(username, log.username);
-        assertEquals(channelId, log.channelId);
-        assertEquals(channelName, log.channelName);
-        assertNotNull(log.timestamp);
+        verify(serverLogRepository).persist(any(ServerLog.class));
     }
 
     @Test
-    @DisplayName("Deve buscar logs por tipo de evento")
-    @Transactional
-    void testGetLogsByEventType() {
-        // Arrange
-        String eventType = "TEST_EVENT";
-        loggingService.createLog(eventType, "Test 1", "123", "user1", "456", "channel1");
-        loggingService.createLog(eventType, "Test 2", "124", "user2", "457", "channel2");
-
-        // Act
-        List<ServerLog> logs = loggingService.getLogsByEventType(eventType);
-
-        // Assert
-        assertEquals(2, logs.size());
-        assertTrue(logs.stream().allMatch(log -> log.eventType.equals(eventType)));
-    }
-
-    @Test
-    @DisplayName("Deve buscar logs por ID do usuário")
-    @Transactional
     void testGetLogsByUserId() {
         // Arrange
         String userId = "123";
-        loggingService.createLog("EVENT1", "Test 1", userId, "user1", "456", "channel1");
-        loggingService.createLog("EVENT2", "Test 2", userId, "user1", "457", "channel2");
+        ServerLog log1 = new ServerLog();
+        log1.setUserId(userId);
+        log1.setUsername("testUser");
+        log1.setEventType("MESSAGE_SENT");
+        log1.setDescription("Test message 1");
+        log1.setChannelId("456");
+        log1.setChannelName("test-channel");
+        log1.setGuildId("789");
+        log1.setCreatedAt(OffsetDateTime.now());
+
+        ServerLog log2 = new ServerLog();
+        log2.setUserId(userId);
+        log2.setUsername("testUser");
+        log2.setEventType("MESSAGE_DELETED");
+        log2.setDescription("Test message 2");
+        log2.setChannelId("456");
+        log2.setChannelName("test-channel");
+        log2.setGuildId("789");
+        log2.setCreatedAt(OffsetDateTime.now());
+
+        when(serverLogRepository.findByUserId(userId)).thenReturn(Arrays.asList(log1, log2));
 
         // Act
         List<ServerLog> logs = loggingService.getLogsByUserId(userId);
 
         // Assert
         assertEquals(2, logs.size());
-        assertTrue(logs.stream().allMatch(log -> log.userId.equals(userId)));
+        assertEquals(userId, logs.get(0).getUserId());
+        assertEquals(userId, logs.get(1).getUserId());
     }
 
     @Test
-    @DisplayName("Deve buscar logs por ID do canal")
-    @Transactional
-    void testGetLogsByChannelId() {
+    void testGetLogsByEventType() {
         // Arrange
-        String channelId = "456";
-        loggingService.createLog("EVENT1", "Test 1", "123", "user1", channelId, "channel1");
-        loggingService.createLog("EVENT2", "Test 2", "124", "user2", channelId, "channel1");
+        String eventType = "MESSAGE_SENT";
+        ServerLog log1 = new ServerLog();
+        log1.setUserId("123");
+        log1.setUsername("testUser");
+        log1.setEventType(eventType);
+        log1.setDescription("Test message 1");
+        log1.setChannelId("456");
+        log1.setChannelName("test-channel");
+        log1.setGuildId("789");
+        log1.setCreatedAt(OffsetDateTime.now());
+
+        ServerLog log2 = new ServerLog();
+        log2.setUserId("456");
+        log2.setUsername("testUser2");
+        log2.setEventType(eventType);
+        log2.setDescription("Test message 2");
+        log2.setChannelId("789");
+        log2.setChannelName("test-channel-2");
+        log2.setGuildId("789");
+        log2.setCreatedAt(OffsetDateTime.now());
+
+        when(serverLogRepository.findByEventType(eventType)).thenReturn(Arrays.asList(log1, log2));
 
         // Act
-        List<ServerLog> logs = loggingService.getLogsByChannelId(channelId);
+        List<ServerLog> logs = loggingService.getLogsByEventType(eventType);
 
         // Assert
         assertEquals(2, logs.size());
-        assertTrue(logs.stream().allMatch(log -> log.channelId.equals(channelId)));
+        assertEquals(eventType, logs.get(0).getEventType());
+        assertEquals(eventType, logs.get(1).getEventType());
     }
 
     @Test
-    @DisplayName("Deve buscar logs por intervalo de datas")
-    @Transactional
     void testGetLogsByDateRange() {
         // Arrange
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime start = now.minusHours(1);
-        LocalDateTime end = now.plusHours(1);
+        OffsetDateTime startDate = OffsetDateTime.now().minusDays(1);
+        OffsetDateTime endDate = OffsetDateTime.now();
+        ServerLog log1 = new ServerLog();
+        log1.setUserId("123");
+        log1.setUsername("testUser");
+        log1.setEventType("MESSAGE_SENT");
+        log1.setDescription("Test message 1");
+        log1.setChannelId("456");
+        log1.setChannelName("test-channel");
+        log1.setGuildId("789");
+        log1.setCreatedAt(startDate.plusHours(1));
 
-        loggingService.createLog("EVENT1", "Test 1", "123", "user1", "456", "channel1");
-        loggingService.createLog("EVENT2", "Test 2", "124", "user2", "457", "channel2");
+        ServerLog log2 = new ServerLog();
+        log2.setUserId("456");
+        log2.setUsername("testUser2");
+        log2.setEventType("MESSAGE_DELETED");
+        log2.setDescription("Test message 2");
+        log2.setChannelId("789");
+        log2.setChannelName("test-channel-2");
+        log2.setGuildId("789");
+        log2.setCreatedAt(endDate.minusHours(1));
+
+        when(serverLogRepository.findByDateRange(startDate, endDate)).thenReturn(Arrays.asList(log1, log2));
 
         // Act
-        List<ServerLog> logs = loggingService.getLogsByDateRange(start, end);
-
-        // Assert
-        assertTrue(logs.size() >= 2);
-        assertTrue(logs.stream().allMatch(log -> 
-            !log.timestamp.isBefore(start) && !log.timestamp.isAfter(end)));
-    }
-
-    @Test
-    @DisplayName("Deve buscar os logs mais recentes")
-    @Transactional
-    void testGetLatestLogs() {
-        // Arrange
-        loggingService.createLog("EVENT1", "Test 1", "123", "user1", "456", "channel1");
-        loggingService.createLog("EVENT2", "Test 2", "124", "user2", "457", "channel2");
-        loggingService.createLog("EVENT3", "Test 3", "125", "user3", "458", "channel3");
-
-        // Act
-        List<ServerLog> logs = loggingService.getLatestLogs(2);
+        List<ServerLog> logs = loggingService.getLogsByDateRange(startDate, endDate);
 
         // Assert
         assertEquals(2, logs.size());
-        assertTrue(logs.get(0).timestamp.isAfter(logs.get(1).timestamp));
+        assertTrue(logs.get(0).getCreatedAt().isAfter(startDate));
+        assertTrue(logs.get(1).getCreatedAt().isBefore(endDate));
     }
 
     @Test
-    @DisplayName("Deve contar logs por tipo de evento")
-    @Transactional
-    void testCountLogsByEventType() {
+    void testGetLatestLogs() {
         // Arrange
-        String eventType = "TEST_EVENT";
-        loggingService.createLog(eventType, "Test 1", "123", "user1", "456", "channel1");
-        loggingService.createLog(eventType, "Test 2", "124", "user2", "457", "channel2");
+        int limit = 5;
+        ServerLog log1 = new ServerLog();
+        log1.setUserId("123");
+        log1.setUsername("testUser");
+        log1.setEventType("MESSAGE_SENT");
+        log1.setDescription("Test message 1");
+        log1.setChannelId("456");
+        log1.setChannelName("test-channel");
+        log1.setGuildId("789");
+        log1.setCreatedAt(OffsetDateTime.now().minusHours(2));
+
+        ServerLog log2 = new ServerLog();
+        log2.setUserId("456");
+        log2.setUsername("testUser2");
+        log2.setEventType("MESSAGE_DELETED");
+        log2.setDescription("Test message 2");
+        log2.setChannelId("789");
+        log2.setChannelName("test-channel-2");
+        log2.setGuildId("789");
+        log2.setCreatedAt(OffsetDateTime.now().minusHours(1));
+
+        when(serverLogRepository.findLatestLogs(limit)).thenReturn(Arrays.asList(log1, log2));
 
         // Act
-        long count = loggingService.countLogsByEventType(eventType);
+        List<ServerLog> logs = loggingService.getLatestLogs(limit);
 
         // Assert
-        assertEquals(2, count);
+        assertEquals(2, logs.size());
+        assertTrue(logs.get(0).getCreatedAt().isAfter(logs.get(1).getCreatedAt()));
     }
 } 

@@ -3,22 +3,37 @@ package io.quarkus.manikomio.model;
 import io.quarkus.hibernate.orm.panache.PanacheEntity;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
-import java.time.LocalDateTime;
+import jakarta.persistence.Column;
+import lombok.Getter;
+import lombok.Setter;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 @Entity
 @Table(name = "server_logs")
+@Getter
+@Setter
 public class ServerLog extends PanacheEntity {
     public String eventType;
     public String description;
+    public String message;
+    
+    @Column(name = "user_id")
     public String userId;
     public String username;
+    
+    @Column(name = "channel_id")
     public String channelId;
     public String channelName;
-    public LocalDateTime timestamp;
+    
+    @Column(name = "guild_id")
+    public String guildId;
+    
+    @Column(name = "created_at")
+    public OffsetDateTime createdAt;
 
     public ServerLog() {
-        this.timestamp = LocalDateTime.now();
+        this.createdAt = OffsetDateTime.now();
     }
 
     // Métodos de consulta usando Panache
@@ -34,12 +49,12 @@ public class ServerLog extends PanacheEntity {
         return list("channelId", channelId);
     }
 
-    public static List<ServerLog> findByDateRange(LocalDateTime start, LocalDateTime end) {
-        return list("timestamp between ?1 and ?2", start, end);
+    public static List<ServerLog> findByDateRange(OffsetDateTime start, OffsetDateTime end) {
+        return find("createdAt BETWEEN ?1 AND ?2", start, end).list();
     }
 
     public static List<ServerLog> findLatestLogs(int limit) {
-        return find("ORDER BY timestamp DESC").page(0, limit).list();
+        return find("ORDER BY createdAt DESC").page(0, limit).list();
     }
 
     public static long countByEventType(String eventType) {

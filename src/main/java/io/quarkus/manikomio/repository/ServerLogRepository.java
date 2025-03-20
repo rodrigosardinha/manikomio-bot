@@ -1,15 +1,16 @@
 package io.quarkus.manikomio.repository;
 
-import io.quarkus.hibernate.orm.panache.PanacheRepository;
 import io.quarkus.manikomio.model.ServerLog;
+import io.quarkus.hibernate.orm.panache.PanacheRepository;
 import jakarta.enterprise.context.ApplicationScoped;
-import java.time.LocalDateTime;
+
+import java.time.OffsetDateTime;
 import java.util.List;
 
 @ApplicationScoped
 public class ServerLogRepository implements PanacheRepository<ServerLog> {
     
-    public List<ServerLog> findLogsByDateRange(LocalDateTime start, LocalDateTime end) {
+    public List<ServerLog> findByDateRange(OffsetDateTime start, OffsetDateTime end) {
         return ServerLog.findByDateRange(start, end);
     }
 
@@ -17,27 +18,27 @@ public class ServerLogRepository implements PanacheRepository<ServerLog> {
         return ServerLog.findLatestLogs(limit);
     }
 
-    public List<ServerLog> findLogsByEventType(String eventType) {
+    public List<ServerLog> findByEventType(String eventType) {
         return ServerLog.findByEventType(eventType);
     }
 
-    public List<ServerLog> findLogsByUserId(String userId) {
+    public List<ServerLog> findByUserId(String userId) {
         return ServerLog.findByUserId(userId);
     }
 
-    public List<ServerLog> findLogsByChannelId(String channelId) {
+    public List<ServerLog> findByChannelId(String channelId) {
         return ServerLog.findByChannelId(channelId);
     }
 
-    public long countLogsByEventType(String eventType) {
+    public long countByEventType(String eventType) {
         return ServerLog.countByEventType(eventType);
     }
 
-    public long countLogsByUserId(String userId) {
+    public long countByUserId(String userId) {
         return ServerLog.countByUserId(userId);
     }
 
-    public long countLogsByChannelId(String channelId) {
+    public long countByChannelId(String channelId) {
         return ServerLog.countByChannelId(channelId);
     }
 } 

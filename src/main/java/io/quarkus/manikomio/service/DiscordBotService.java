@@ -34,6 +34,7 @@ import org.jboss.logging.Logger;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.EnumSet;
+import java.util.List;
 
 @ApplicationScoped
 @RegisterForReflection
@@ -54,6 +55,11 @@ public class DiscordBotService extends ListenerAdapter {
     LoggingService loggingService;
 
     private JDA jda;
+    private static final String COMMAND_PREFIX = "!";
+
+    public JDA getJda() {
+        return jda;
+    }
 
     void onStart(@Observes StartupEvent ev) {
         try {
@@ -116,7 +122,7 @@ public class DiscordBotService extends ListenerAdapter {
             
             // Envia mensagem de teste
             LOGGER.info("Enviando mensagem de teste para o canal de logs...");
-            logChannel.sendMessage("Bot iniciado com sucesso! 🚀").queue(
+            logChannel.sendMessage("✅ Bot iniciado com sucesso! Sistema de logs ativo.").queue(
                 success -> LOGGER.info("Mensagem de teste enviada com sucesso!"),
                 error -> LOGGER.error("Erro ao enviar mensagem de teste: " + error.getMessage())
             );
@@ -128,325 +134,362 @@ public class DiscordBotService extends ListenerAdapter {
         }
     }
 
-    @Override
-    @Transactional
-    public void onMessageReceived(MessageReceivedEvent event) {
+    private void processCommand(MessageReceivedEvent event) {
+        String message = event.getMessage().getContentRaw();
+        if (!message.startsWith(COMMAND_PREFIX)) {
+            return;
+        }
+
+        String[] args = message.substring(1).split("\\s+");
+        String command = args[0].toLowerCase();
+
         try {
-            LOGGER.info("Evento de mensagem recebido");
+            switch (command) {
+                case "testlog":
+                    handleTestLogCommand(event);
+                    break;
+                case "logs":
+                    handleLogsCommand(event, args);
+                    break;
+                default:
+                    // Comando desconhecido
+                    event.getChannel().sendMessage("❌ Comando desconhecido. Use !logs para ver os comandos disponíveis.").queue();
+                    break;
+            }
+        } catch (Exception e) {
+            LOGGER.error("Erro ao processar comando: " + e.getMessage(), e);
+            event.getChannel().sendMessage("❌ Erro ao processar comando: " + e.getMessage()).queue();
+        }
+    }
+
+    private void handleTestLogCommand(MessageReceivedEvent event) {
+        event.getChannel().sendMessage("✅ Sistema de logs funcionando!").queue();
+    }
+
+    private void handleLogsCommand(MessageReceivedEvent event, String[] args) {
+        if (args.length < 2) {
+            // Mostra os últimos logs
+            List<ServerLog> logs = loggingService.getLatestLogs(5);
+            sendLogsResponse(event, logs, "Últimos 5 logs");
+            return;
+        }
+
+        String subCommand = args[1].toLowerCase();
+        
+        switch (subCommand) {
+            case "user":
+                if (args.length < 3) {
+                    event.getChannel().sendMessage("❌ Por favor, mencione um usuário. Exemplo: !logs user @usuario").queue();
+                    return;
+                }
+                handleUserLogsCommand(event, args[2]);
+                break;
+                
+            case "type":
+                if (args.length < 3) {
+                    event.getChannel().sendMessage("❌ Por favor, especifique um tipo de log. Exemplo: !logs type MESSAGE").queue();
+                    return;
+                }
+                handleTypeLogsCommand(event, args[2]);
+                break;
+
+            case "period":
+                if (args.length < 4) {
+                    event.getChannel().sendMessage("❌ Por favor, especifique o período. Exemplo: !logs period 1h 5").queue();
+                    return;
+                }
+                handlePeriodLogsCommand(event, args[2], args[3]);
+                break;
+                
+            default:
+                event.getChannel().sendMessage("❌ Subcomando desconhecido. Use:\n" +
+                    "!logs - Mostra os últimos logs\n" +
+                    "!logs user @usuario - Mostra logs de um usuário\n" +
+                    "!logs type tipo - Mostra logs de um tipo específico\n" +
+                    "!logs period tempo limite - Mostra logs do período (ex: 1h 5)").queue();
+                break;
+        }
+    }
+
+    private void handlePeriodLogsCommand(MessageReceivedEvent event, String period, String limit) {
+        try {
+            int hours = Integer.parseInt(period.replace("h", ""));
+            int maxResults = Integer.parseInt(limit);
             
-            if (event.getAuthor().isBot()) {
-                LOGGER.debug("Ignorando mensagem de bot");
+            if (maxResults > 10) {
+                event.getChannel().sendMessage("❌ O limite máximo de resultados é 10.").queue();
                 return;
             }
 
-            String messageContent = event.getMessage().getContentDisplay();
-            String authorName = event.getAuthor().getName();
-            String channelName = event.getChannel().getName();
+            OffsetDateTime end = OffsetDateTime.now();
+            OffsetDateTime start = end.minusHours(hours);
             
-            LOGGER.info(String.format("Processando mensagem de %s no canal %s: %s", 
-                authorName, channelName, messageContent));
-
-            ServerLog log = loggingService.createLog(
-                "MESSAGE_CREATE",
-                String.format("%s enviou uma mensagem em #%s: %s",
-                    authorName,
-                    channelName,
-                    messageContent),
-                event.getAuthor().getId(),
-                authorName,
-                event.getChannel().getId(),
-                channelName
-            );
-            
-            LOGGER.info("Log criado com sucesso: " + log.id);
-            sendLogToChannel(String.format("%s enviou uma mensagem em #%s: %s",
-                authorName,
-                channelName,
-                messageContent));
-            
-        } catch (Exception e) {
-            LOGGER.error("Erro ao processar mensagem recebida: " + e.getMessage(), e);
-            e.printStackTrace();
-        }
-    }
-
-    @Override
-    @Transactional
-    public void onMessageUpdate(MessageUpdateEvent event) {
-        try {
-            LOGGER.info("Evento de atualização de mensagem recebido");
-            loggingService.createLog(
-                "MESSAGE_UPDATE",
-                String.format("%s editou uma mensagem em #%s",
-                    event.getAuthor().getName(),
-                    event.getChannel().getName()),
-                event.getAuthor().getId(),
-                event.getAuthor().getName(),
-                event.getChannel().getId(),
-                event.getChannel().getName()
-            );
-            sendLogToChannel(String.format("%s editou uma mensagem em #%s",
-                event.getAuthor().getName(),
-                event.getChannel().getName()));
-        } catch (Exception e) {
-            LOGGER.error("Erro ao processar atualização de mensagem: " + e.getMessage(), e);
-            e.printStackTrace();
-        }
-    }
-
-    @Override
-    @Transactional
-    public void onMessageDelete(MessageDeleteEvent event) {
-        try {
-            LOGGER.info("Evento de deleção de mensagem recebido");
-            loggingService.createLog(
-                "MESSAGE_DELETE",
-                String.format("Uma mensagem foi deletada em #%s",
-                    event.getChannel().getName()),
-                null,
-                null,
-                event.getChannel().getId(),
-                event.getChannel().getName()
-            );
-            sendLogToChannel(String.format("Uma mensagem foi deletada em #%s",
-                event.getChannel().getName()));
-        } catch (Exception e) {
-            LOGGER.error("Erro ao processar deleção de mensagem: " + e.getMessage(), e);
-            e.printStackTrace();
-        }
-    }
-
-    @Override
-    @Transactional
-    public void onChannelCreate(ChannelCreateEvent event) {
-        try {
-            LOGGER.info("Evento de criação de canal recebido");
-            loggingService.createLog(
-                "CHANNEL_CREATE",
-                String.format("Um novo canal foi criado: #%s",
-                    event.getChannel().getName()),
-                null,
-                null,
-                event.getChannel().getId(),
-                event.getChannel().getName()
-            );
-            sendLogToChannel(String.format("Um novo canal foi criado: #%s",
-                event.getChannel().getName()));
-        } catch (Exception e) {
-            LOGGER.error("Erro ao processar criação de canal: " + e.getMessage(), e);
-            e.printStackTrace();
-        }
-    }
-
-    @Override
-    @Transactional
-    public void onChannelDelete(ChannelDeleteEvent event) {
-        try {
-            LOGGER.info("Evento de deleção de canal recebido");
-            loggingService.createLog(
-                "CHANNEL_DELETE",
-                String.format("O canal #%s foi deletado",
-                    event.getChannel().getName()),
-                null,
-                null,
-                event.getChannel().getId(),
-                event.getChannel().getName()
-            );
-            sendLogToChannel(String.format("O canal #%s foi deletado",
-                event.getChannel().getName()));
-        } catch (Exception e) {
-            LOGGER.error("Erro ao processar deleção de canal: " + e.getMessage(), e);
-            e.printStackTrace();
-        }
-    }
-
-    @Override
-    @Transactional
-    public void onGuildVoiceUpdate(GuildVoiceUpdateEvent event) {
-        try {
-            LOGGER.debug("Estado de voz atualizado para o usuário: " + event.getMember().getEffectiveName());
-            
-            String description;
-            if (event.getChannelLeft() != null && event.getChannelJoined() == null) {
-                description = String.format("%s saiu do canal de voz %s",
-                    event.getMember().getEffectiveName(),
-                    event.getChannelLeft().getName());
-            } else if (event.getChannelJoined() != null && event.getChannelLeft() == null) {
-                description = String.format("%s entrou no canal de voz %s",
-                    event.getMember().getEffectiveName(),
-                    event.getChannelJoined().getName());
-            } else {
-                description = String.format("%s mudou do canal %s para o canal %s",
-                    event.getMember().getEffectiveName(),
-                    event.getChannelLeft().getName(),
-                    event.getChannelJoined().getName());
+            List<ServerLog> logs = loggingService.getLogsByDateRange(start, end);
+            if (logs.size() > maxResults) {
+                logs = logs.subList(0, maxResults);
             }
 
+            sendLogsResponse(event, logs, String.format("Logs das últimas %d horas (limitado a %d resultados)", hours, maxResults));
+        } catch (NumberFormatException e) {
+            event.getChannel().sendMessage("❌ Formato inválido. Use: !logs period 1h 5 (onde 1h é o período e 5 é o limite)").queue();
+        }
+    }
+
+    private void sendLogsResponse(MessageReceivedEvent event, List<ServerLog> logs, String title) {
+        if (logs.isEmpty()) {
+            event.getChannel().sendMessage("📝 Nenhum log encontrado.").queue();
+            return;
+        }
+
+        StringBuilder response = new StringBuilder();
+        response.append("📝 **").append(title).append(":**\n\n");
+        
+        for (ServerLog log : logs) {
+            // Adiciona emoji baseado no tipo de evento
+            String eventEmoji = getEventEmoji(log.eventType);
+            response.append(eventEmoji).append(" **").append(log.eventType).append("**\n");
+            response.append("📄 ").append(log.description).append("\n");
+            
+            if (log.username != null) {
+                response.append("👤 Usuário: ").append(log.username).append("\n");
+            }
+            if (log.channelName != null) {
+                response.append("📺 Canal: ").append(log.channelName).append("\n");
+            }
+            response.append("⏰ Data: ").append(log.createdAt).append("\n");
+            response.append("-------------------\n");
+        }
+
+        // Divide a mensagem em partes se for muito grande
+        String message = response.toString();
+        if (message.length() > 2000) {
+            String[] parts = message.split("-------------------");
+            StringBuilder currentPart = new StringBuilder();
+            
+            for (String part : parts) {
+                if ((currentPart.length() + part.length() + 20) > 2000) {
+                    event.getChannel().sendMessage(currentPart.toString()).queue();
+                    currentPart = new StringBuilder();
+                }
+                currentPart.append(part).append("-------------------\n");
+            }
+            
+            if (currentPart.length() > 0) {
+                event.getChannel().sendMessage(currentPart.toString()).queue();
+            }
+        } else {
+            event.getChannel().sendMessage(message).queue();
+        }
+    }
+
+    private String getEventEmoji(String eventType) {
+        switch (eventType) {
+            case "MESSAGE": return "💬";
+            case "MESSAGE_UPDATE": return "✏️";
+            case "MESSAGE_DELETE": return "🗑️";
+            case "CHANNEL_CREATE": return "📝";
+            case "CHANNEL_DELETE": return "❌";
+            case "VOICE_STATE_UPDATE": return "🔊";
+            case "MEMBER_KICK": return "👢";
+            case "MEMBER_BAN": return "🔨";
+            case "MEMBER_TIMEOUT": return "⏳";
+            case "MEMBER_UNBAN": return "🔓";
+            default: return "📋";
+        }
+    }
+
+    private void handleUserLogsCommand(MessageReceivedEvent event, String userMention) {
+        // Remove os caracteres de menção do ID do usuário
+        String userId = userMention.replaceAll("[<@!>]", "");
+        
+        List<ServerLog> logs = loggingService.getLogsByUserId(userId);
+        sendLogsResponse(event, logs, "Logs do usuário");
+    }
+
+    private void handleTypeLogsCommand(MessageReceivedEvent event, String eventType) {
+        List<ServerLog> logs = loggingService.getLogsByEventType(eventType.toUpperCase());
+        sendLogsResponse(event, logs, "Logs do tipo " + eventType.toUpperCase());
+    }
+
+    @Override
+    public void onMessageReceived(MessageReceivedEvent event) {
+        if (event.getAuthor().isBot()) return;
+        
+        // Processa comandos
+        if (event.getMessage().getContentRaw().startsWith(COMMAND_PREFIX)) {
+            processCommand(event);
+            return;
+        }
+
+        // Loga a mensagem
+        loggingService.createLog(
+            event.getAuthor().getId(),
+            event.getAuthor().getName(),
+            "MESSAGE_SENT",
+            "Mensagem enviada no canal " + event.getChannel().getName(),
+            event.getChannel().getId(),
+            event.getChannel().getName(),
+            event.getGuild().getId(),
+            event.getMessage().getContentDisplay()
+        );
+    }
+
+    @Override
+    public void onMessageUpdate(MessageUpdateEvent event) {
+        if (event.getAuthor().isBot()) return;
+
+        loggingService.createLog(
+            event.getAuthor().getId(),
+            event.getAuthor().getName(),
+            "MESSAGE_EDITED",
+            "Mensagem editada no canal " + event.getChannel().getName(),
+            event.getChannel().getId(),
+            event.getChannel().getName(),
+            event.getGuild().getId(),
+            event.getMessage().getContentDisplay()
+        );
+    }
+
+    @Override
+    public void onMessageDelete(MessageDeleteEvent event) {
+        loggingService.createLog(
+            "SYSTEM",
+            "Sistema",
+            "MESSAGE_DELETED",
+            "Mensagem deletada no canal " + event.getChannel().getName(),
+            event.getChannel().getId(),
+            event.getChannel().getName(),
+            event.getGuild().getId(),
+            "Mensagem deletada"
+        );
+    }
+
+    @Override
+    public void onChannelCreate(ChannelCreateEvent event) {
+        loggingService.createLog(
+            "SYSTEM",
+            "Sistema",
+            "CHANNEL_CREATED",
+            "Canal criado: " + event.getChannel().getName(),
+            event.getChannel().getId(),
+            event.getChannel().getName(),
+            event.getGuild().getId(),
+            "Canal criado"
+        );
+    }
+
+    @Override
+    public void onChannelDelete(ChannelDeleteEvent event) {
+        loggingService.createLog(
+            "SYSTEM",
+            "Sistema",
+            "CHANNEL_DELETED",
+            "Canal deletado: " + event.getChannel().getName(),
+            event.getChannel().getId(),
+            event.getChannel().getName(),
+            event.getGuild().getId(),
+            "Canal deletado"
+        );
+    }
+
+    @Override
+    public void onGuildVoiceUpdate(GuildVoiceUpdateEvent event) {
+        if (event.getChannelJoined() != null && event.getChannelLeft() == null) {
+            // Usuário entrou em um canal de voz
             loggingService.createLog(
-                "VOICE_STATE_UPDATE",
-                description,
                 event.getMember().getId(),
                 event.getMember().getEffectiveName(),
-                event.getChannelJoined() != null ? event.getChannelJoined().getId() : event.getChannelLeft().getId(),
-                event.getChannelJoined() != null ? event.getChannelJoined().getName() : event.getChannelLeft().getName()
+                "VOICE_JOINED",
+                "Entrou no canal de voz: " + event.getChannelJoined().getName(),
+                event.getChannelJoined().getId(),
+                event.getChannelJoined().getName(),
+                event.getGuild().getId(),
+                "Entrou no canal de voz"
             );
-            sendLogToChannel(description);
-        } catch (Exception e) {
-            LOGGER.error("Erro ao processar evento de atualização de estado de voz: " + e.getMessage(), e);
+        } else if (event.getChannelJoined() == null && event.getChannelLeft() != null) {
+            // Usuário saiu de um canal de voz
+            loggingService.createLog(
+                event.getMember().getId(),
+                event.getMember().getEffectiveName(),
+                "VOICE_LEFT",
+                "Saiu do canal de voz: " + event.getChannelLeft().getName(),
+                event.getChannelLeft().getId(),
+                event.getChannelLeft().getName(),
+                event.getGuild().getId(),
+                "Saiu do canal de voz"
+            );
+        } else if (event.getChannelJoined() != null && event.getChannelLeft() != null) {
+            // Usuário mudou de canal de voz
+            loggingService.createLog(
+                event.getMember().getId(),
+                event.getMember().getEffectiveName(),
+                "VOICE_MOVED",
+                "Mudou do canal " + event.getChannelLeft().getName() + " para " + event.getChannelJoined().getName(),
+                event.getChannelJoined().getId(),
+                event.getChannelJoined().getName(),
+                event.getGuild().getId(),
+                "Mudou de canal de voz"
+            );
         }
     }
 
     @Override
-    @Transactional
     public void onGuildMemberRemove(GuildMemberRemoveEvent event) {
-        try {
-            LOGGER.info("Evento de remoção de membro recebido");
-            
-            // Verificar se foi um kick
-            event.getGuild().retrieveAuditLogs()
-                .type(ActionType.KICK)
-                .limit(1)
-                .queue(logs -> {
-                    if (!logs.isEmpty()) {
-                        AuditLogEntry entry = logs.get(0);
-                        // Verifica se o log é recente (menos de 1 segundo)
-                        if (entry.getTimeCreated().isAfter(OffsetDateTime.now().minusSeconds(1))) {
-                            String description = String.format("%s foi expulso por %s. Motivo: %s",
-                                event.getUser().getName(),
-                                entry.getUser().getName(),
-                                entry.getReason() != null ? entry.getReason() : "Nenhum motivo fornecido");
-                            
-                            loggingService.createLog(
-                                "MEMBER_KICK",
-                                description,
-                                event.getUser().getId(),
-                                event.getUser().getName(),
-                                null,
-                                null
-                            );
-                            
-                            sendLogToChannel(description);
-                        }
-                    }
-                });
-        } catch (Exception e) {
-            LOGGER.error("Erro ao processar evento de remoção de membro: " + e.getMessage(), e);
-            e.printStackTrace();
-        }
+        loggingService.createLog(
+            event.getUser().getId(),
+            event.getUser().getName(),
+            "MEMBER_LEFT",
+            "Membro saiu do servidor",
+            "SYSTEM",
+            "Sistema",
+            event.getGuild().getId(),
+            "Saiu do servidor"
+        );
     }
 
     @Override
-    @Transactional
     public void onGuildBan(GuildBanEvent event) {
-        try {
-            LOGGER.info("Evento de banimento recebido");
-            
-            event.getGuild().retrieveAuditLogs()
-                .type(ActionType.BAN)
-                .limit(1)
-                .queue(logs -> {
-                    if (!logs.isEmpty()) {
-                        AuditLogEntry entry = logs.get(0);
-                        if (entry.getTimeCreated().isAfter(OffsetDateTime.now().minusSeconds(1))) {
-                            String description = String.format("%s foi banido por %s. Motivo: %s",
-                                event.getUser().getName(),
-                                entry.getUser().getName(),
-                                entry.getReason() != null ? entry.getReason() : "Nenhum motivo fornecido");
-                            
-                            loggingService.createLog(
-                                "MEMBER_BAN",
-                                description,
-                                event.getUser().getId(),
-                                event.getUser().getName(),
-                                null,
-                                null
-                            );
-                            
-                            sendLogToChannel(description);
-                        }
-                    }
-                });
-        } catch (Exception e) {
-            LOGGER.error("Erro ao processar evento de banimento: " + e.getMessage(), e);
-            e.printStackTrace();
-        }
+        loggingService.createLog(
+            event.getUser().getId(),
+            event.getUser().getName(),
+            "MEMBER_BANNED",
+            "Membro banido do servidor",
+            "SYSTEM",
+            "Sistema",
+            event.getGuild().getId(),
+            "Banido do servidor"
+        );
     }
 
     @Override
-    @Transactional
     public void onGuildMemberUpdateTimeOut(GuildMemberUpdateTimeOutEvent event) {
-        try {
-            LOGGER.info("Evento de timeout recebido");
-            
-            if (event.getNewTimeOutEnd() != null) {
-                event.getGuild().retrieveAuditLogs()
-                    .type(ActionType.MEMBER_UPDATE)
-                    .limit(1)
-                    .queue(logs -> {
-                        if (!logs.isEmpty()) {
-                            AuditLogEntry entry = logs.get(0);
-                            if (entry.getTimeCreated().isAfter(OffsetDateTime.now().minusSeconds(1))) {
-                                Duration duration = Duration.between(OffsetDateTime.now(), event.getNewTimeOutEnd());
-                                String description = String.format("%s recebeu timeout por %s por %d minutos. Motivo: %s",
-                                    event.getMember().getEffectiveName(),
-                                    entry.getUser().getName(),
-                                    duration.toMinutes(),
-                                    entry.getReason() != null ? entry.getReason() : "Nenhum motivo fornecido");
-                                
-                                loggingService.createLog(
-                                    "MEMBER_TIMEOUT",
-                                    description,
-                                    event.getMember().getId(),
-                                    event.getMember().getEffectiveName(),
-                                    null,
-                                    null
-                                );
-                                
-                                sendLogToChannel(description);
-                            }
-                        }
-                    });
-            }
-        } catch (Exception e) {
-            LOGGER.error("Erro ao processar evento de timeout: " + e.getMessage(), e);
-            e.printStackTrace();
+        if (event.getNewTimeOutEnd() != null) {
+            Duration timeoutDuration = Duration.between(OffsetDateTime.now(), event.getNewTimeOutEnd());
+            loggingService.createLog(
+                event.getMember().getId(),
+                event.getMember().getEffectiveName(),
+                "MEMBER_TIMEOUT",
+                "Membro silenciado por " + timeoutDuration.toMinutes() + " minutos",
+                "SYSTEM",
+                "Sistema",
+                event.getGuild().getId(),
+                "Silenciado por " + timeoutDuration.toMinutes() + " minutos"
+            );
         }
     }
 
     @Override
-    @Transactional
     public void onGuildUnban(GuildUnbanEvent event) {
-        try {
-            LOGGER.info("Evento de desbanimento recebido");
-            
-            event.getGuild().retrieveAuditLogs()
-                .type(ActionType.UNBAN)
-                .limit(1)
-                .queue(logs -> {
-                    if (!logs.isEmpty()) {
-                        AuditLogEntry entry = logs.get(0);
-                        if (entry.getTimeCreated().isAfter(OffsetDateTime.now().minusSeconds(1))) {
-                            String description = String.format("%s foi desbanido por %s",
-                                event.getUser().getName(),
-                                entry.getUser().getName());
-                            
-                            loggingService.createLog(
-                                "MEMBER_UNBAN",
-                                description,
-                                event.getUser().getId(),
-                                event.getUser().getName(),
-                                null,
-                                null
-                            );
-                            
-                            sendLogToChannel(description);
-                        }
-                    }
-                });
-        } catch (Exception e) {
-            LOGGER.error("Erro ao processar evento de desbanimento: " + e.getMessage(), e);
-            e.printStackTrace();
-        }
+        loggingService.createLog(
+            event.getUser().getId(),
+            event.getUser().getName(),
+            "MEMBER_UNBANNED",
+            "Membro desbanido do servidor",
+            "SYSTEM",
+            "Sistema",
+            event.getGuild().getId(),
+            "Desbanido do servidor"
+        );
     }
 
     protected void sendLogToChannel(String message) {
